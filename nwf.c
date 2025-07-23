@@ -45,8 +45,7 @@ engine_errx(int ex, struct imsg *msg)
 static void
 usage(void)
 {
-	fprintf(stderr, "usage: nwf [-o directory] [url ...]\n");
-	fprintf(stderr, "usage: nwf [-o file] url\n");
+	fprintf(stderr, "usage: nwf [-o file] [url ...]\n");
 	exit(2);
 }
 
@@ -55,7 +54,7 @@ main(int argc, char *argv[])
 {
 	struct imsgbuf msgbuf;
 	const char *engine_path, *output_path;
-	int ch, dev_null, i, need_path, output_dir, output_file, sv[2];
+	int ch, dev_null, i, need_path, output_file, sv[2];
 
 	/*
 	 * Cant use getprogname(3) because it will remove the "./"
@@ -82,44 +81,20 @@ main(int argc, char *argv[])
 	if (argc == 0)
 		usage();
 
-	output_dir = AT_FDCWD;
-	output_file = -1;
-
 	if (output_path != NULL) {
-		struct stat sb;
 		char *trailing_slash;
-		int stat_error;
+
+		if (argc > 1)
+			errx(1, "cannot specify -o with multiple urls");
 
 		if ((trailing_slash = strrchr(output_path, '/')) != NULL
 		    && trailing_slash[1] == '\0')
 			*trailing_slash = '\0';
 
-		stat_error = stat(output_path, &sb);
-		if (stat_error == -1) {
-			switch (errno) {
-			case ENOENT:
-				break;
-			default:
-				err(1, "%s", output_path);
-			}
-		}
-
 		if (!strcmp(output_path, "-")) {
 			if (argc > 1)
 				errx(1, "cannot output multiple files to stdout");
 			output_file = STDOUT_FILENO;
-		}
-		else if (argc > 1 || (stat_error != -1 && S_ISDIR(sb.st_mode))) {
-			if (stat_error == -1) {
-				if (mkdir(output_path, 0700) == -1 && errno != EEXIST)
-					err(1, "%s", output_path);
-			}
-
-			output_dir = open(output_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-			if (output_dir == -1)
-				err(1, "%s", output_path);
-
-			fprintf(stderr, "outputting to %s directory\n", output_path);
 		}
 		else {
 			output_file = open(output_path,
@@ -128,6 +103,9 @@ main(int argc, char *argv[])
 			if (output_file == -1)
 				err(1, "%s", output_path);
 		}
+	}
+	else {
+		output_file = -1;
 	}
 
 	if ((dev_null = open(PATH_DEV_NULL, O_RDWR | O_CLOEXEC)) == -1)
@@ -166,14 +144,8 @@ main(int argc, char *argv[])
 	signal(SIGPIPE, SIG_IGN);
 
 	if (output_file == -1) {
-		if (output_dir == AT_FDCWD) {
-			if (unveil(".", "cw") == -1)
-				err(1, ".");
-		}
-		else {
-			if (unveil(output_path, "cw") == -1)
-				err(1, "%s", output_path);
-		}
+		if (unveil(".", "cw") == -1)
+			err(1, ".");
 		if (pledge("stdio cpath wpath sendfd", NULL) == -1)
 			err(1, "pledge");
 	}
@@ -279,18 +251,13 @@ main(int argc, char *argv[])
 		imsg_free(&msg);
 
 		if (output_file == -1) {
-			if ((output_file_send = openat(output_dir, pathp,
+			if ((output_file_send = open(pathp,
 						  O_WRONLY | O_CREAT | O_EXCL | O_TRUNC,
 						  0700)) == -1) {
 				if (errno == EEXIST) {
 					int ch;
 
-					if (output_dir == AT_FDCWD)
-						fprintf(stderr, "file %s exists, overwrite? (y/n) ", pathp);
-					else {
-						fprintf(stderr, "file %s/%s exists, overwrite? (y/n) ",
-							output_path, pathp);
-					}
+					fprintf(stderr, "file %s exists, overwrite? (y/n) ", pathp);
 
 					ch = fgetc(stdin);
 					switch (ch) {
@@ -306,34 +273,23 @@ main(int argc, char *argv[])
 						errx(1, "invalid response");
 					}
 
-					output_file_send = openat(output_dir, pathp,
+					output_file_send = open(pathp,
 								 O_WRONLY | O_CREAT | O_TRUNC,
 								 0700);
-					if (output_file_send == -1) {
-						if (output_dir == AT_FDCWD)
-							err(1, "%s", pathp);
-						else
-							err(1, "%s/%s", output_path, pathp);
-					}
+					if (output_file_send == -1)
+						err(1, "%s", pathp);
 				}
-				else if (output_dir == AT_FDCWD)
-					err(1, "%s", pathp);
-				else
-					err(1, "%s/%s", output_path, pathp);
+				err(1, "%s", pathp);
 			}
 		}
 		else {
 			output_file_send = output_file;
 		}
 
-		if (output_dir == AT_FDCWD) {
-			if (output_file == STDOUT_FILENO)
-				fprintf(stderr, "saving file to stdout\n");
-			else
-				fprintf(stderr, "saving file to %s\n", pathp);
-		}
+		if (output_file == STDOUT_FILENO)
+			fprintf(stderr, "saving file to stdout\n");
 		else
-			fprintf(stderr, "saving file to %s/%s\n", output_path, pathp);
+			fprintf(stderr, "saving file to %s\n", pathp);
 
 		if (output_file_send != STDOUT_FILENO) {
 			if (imsg_compose(&msgbuf, ENGINE_IMSG_FILE, 0,
@@ -378,8 +334,6 @@ main(int argc, char *argv[])
 		}
 	}
 
-	if (output_dir != AT_FDCWD)
-		close(output_dir);
 	imsgbuf_clear(&msgbuf);
 	close(sv[0]);
 }
