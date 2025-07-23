@@ -17,4 +17,10 @@ enum {
 #define ENGINE_ERROR_MAX 128
 #define ENGINE_URL_MAX 2000
 
+struct engine_progress {
+	long long content_length;
+	long long total_read;
+	unsigned int percent;
+};
+
 #endif /* ENGINE_H */

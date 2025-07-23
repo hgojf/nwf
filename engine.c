@@ -780,9 +780,16 @@ main(int argc, char *argv[])
 
 				percent = (total_read * 100) / content_length;
 				if (percent != last_percent) {
+					struct engine_progress progress;
+
+					memset(&progress, 0, sizeof(progress));
+					progress.content_length = content_length;
+					progress.percent = percent;
+					progress.total_read = total_read;
+
 					if (imsg_compose(&msgbuf, ENGINE_IMSG_PROGRESS,
-							 0, -1, -1, &percent,
-							 sizeof(percent)) == -1)
+							 0, -1, -1, &progress,
+							 sizeof(progress)) == -1)
 						fatal(1, "imsg_compose");
 					if (imsgbuf_flush(&msgbuf) == -1)
 						fatal(1, "imsgbuf_flush");

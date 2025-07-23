@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <util.h>
 
 #include "engine.h"
 #include "imsg-blocking.h"
@@ -336,7 +337,9 @@ main(int argc, char *argv[])
 		}
 
 		for (;;) {
-			unsigned int percent;
+			struct engine_progress progress;
+			char content_length[FMT_SCALED_STRSIZE];
+			char total_read[FMT_SCALED_STRSIZE];
 
 			n = imsg_get_blocking(&msgbuf, &msg);
 			if (n == -1)
@@ -353,11 +356,16 @@ main(int argc, char *argv[])
 
 			if (imsg_get_type(&msg) != ENGINE_IMSG_PROGRESS)
 				errx(1, "engine sent unknown imsg type");
-			if (imsg_get_data(&msg, &percent, sizeof(percent)) == -1)
+			if (imsg_get_data(&msg, &progress, sizeof(progress)) == -1)
 				errx(1, "engine sent data with wrong size");
-			if (percent > 100)
+			if (progress.percent > 100)
 				errx(1, "engine sent percentage greater than 100%%");
-			fprintf(stderr, "\x1b[K%d%%\r", percent);
+			if (fmt_scaled(progress.content_length, content_length) == -1)
+				err(1, "fmt_scaled");
+			if (fmt_scaled(progress.total_read, total_read) == -1)
+				err(1, "fmt_scaled");
+			fprintf(stderr, "\x1b[K%d%% (%s/%s)\r",
+				progress.percent, total_read, content_length);
 
 			imsg_free(&msg);
 		}
