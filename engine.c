@@ -3,6 +3,7 @@
 #include <sys/uio.h>
 
 #include <ctype.h>
+#include <err.h>
 #include <errno.h>
 #include <imsg.h>
 #include <libgen.h>
@@ -275,6 +276,9 @@ main(int argc, char *argv[])
 	struct tls_config *tls_config;
 	int n, need_path, output_stdout;
 
+	if (argc != 2 || strcmp(argv[1], "-r") != 0)
+		errx(1, "nwf-engine should not be run directly");
+
 	if (imsgbuf_init(&msgbuf, 3) == -1)
 		exit(1);
 	imsgbuf_allow_fdpass(&msgbuf);
@@ -291,9 +295,6 @@ main(int argc, char *argv[])
 
 	if (pledge("stdio inet dns recvfd", NULL) == -1)
 		fatal(1, "pledge");
-
-	if (argc != 2 || strcmp(argv[1], "-r") != 0)
-		fatalx(1, "nwf-engine should not be run directly");
 
 	n = imsg_get_blocking(&msgbuf, &msg);
 	if (n == -1)
