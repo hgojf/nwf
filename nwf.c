@@ -54,8 +54,16 @@ int
 main(int argc, char *argv[])
 {
 	struct imsgbuf msgbuf;
-	const char *output_path;
+	const char *engine_path, *output_path;
 	int ch, dev_null, i, need_path, output_dir, output_file, sv[2];
+
+	/*
+	 * Cant use getprogname(3) because it will remove the "./"
+	 */
+	if (!strcmp(argv[0], "./nwf"))
+		engine_path = "./nwf-engine";
+	else
+		engine_path = PATH_NWF_ENGINE;
 
 	output_path = NULL;
 	while ((ch = getopt(argc, argv, "o:")) != -1) {
@@ -147,7 +155,7 @@ main(int argc, char *argv[])
 		}
 		if (dup2(sv[1], 3) == -1)
 			err(1, "dup2");
-		execl(PATH_NWF_ENGINE, "nwf-engine", "-r", NULL);
+		execl(engine_path, "nwf-engine", "-r", NULL);
 		err(1, "%s", PATH_NWF_ENGINE);
 	default:
 		break;
