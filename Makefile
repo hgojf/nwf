@@ -1,5 +1,6 @@
-.PHONY: all clean
+.PHONY: all clean install
 
+CFLAGS += -DPREFIX=\"$(PREFIX)\"
 CFLAGS += -MD -MP
 CFLAGS += -Wall -Wextra
 CFLAGS += -std=c99 -pedantic
@@ -36,3 +37,10 @@ OBJS_ALL = $(SRCS_ALL:.c=.o)
 
 clean:
 	rm -f $(BINARIES) $(DEPS_ALL) $(OBJS_ALL)
+
+PREFIX ?= /usr/local
+MANPATH ?= $(PREFIX)/man
+
+install:
+	$(INSTALL) -m 0755 nwf $(PREFIX)/bin
+	$(INSTALL) -m 0755 nwf-engine $(PREFIX)/libexec
