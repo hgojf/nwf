@@ -273,8 +273,7 @@ main(int argc, char *argv[])
 {
 	struct imsg msg;
 	struct tls_config *tls_config;
-	FILE *stdout_copy;
-	int n, need_path;
+	int n, need_path, output_stdout;
 
 	if (imsgbuf_init(&msgbuf, 3) == -1)
 		exit(1);
@@ -302,12 +301,7 @@ main(int argc, char *argv[])
 	if (n == 0)
 		fatalx(1, "imsg_get_blocking EOF");
 	if (imsg_get_type(&msg) == ENGINE_IMSG_FILE_STDOUT) {
-		int stdout_fd;
-
-		if ((stdout_fd = imsg_get_fd(&msg)) == -1)
-			fatalx(1, "parent didnt send file descriptor");
-		if ((stdout_copy = fdopen(stdout_fd, "w")) == NULL)
-			fatal(1, "fdopen");
+		output_stdout = 1;
 		imsg_free(&msg);
 
 		if (pledge("stdio inet dns", NULL) == -1)
@@ -320,7 +314,7 @@ main(int argc, char *argv[])
 			fatalx(1, "imsg_get_blocking EOF");
 	}
 	else {
-		stdout_copy = NULL;
+		output_stdout = 0;
 	}
 	if (imsg_get_type(&msg) != ENGINE_IMSG_NEED_PATH)
 		fatalx(1, "parent sent unknown imsg type");
@@ -570,7 +564,7 @@ main(int argc, char *argv[])
 		if (imsgbuf_flush(&msgbuf) == -1)
 			fatal(1, "imsgbuf_flush");
 
-		if (stdout_copy == NULL) {
+		if (!output_stdout) {
 			int output_fd;
 
 			n = imsg_get_blocking(&msgbuf, &msg);
@@ -587,7 +581,7 @@ main(int argc, char *argv[])
 			imsg_free(&msg);
 		}
 		else {
-			output_file = stdout_copy;
+			output_file = stdout;
 		}
 
 		chunked = 0;
@@ -821,7 +815,7 @@ main(int argc, char *argv[])
 		if (imsgbuf_flush(&msgbuf) == -1)
 			fatal(1, "imsgbuf_flush");
 
-		if (output_file != stdout_copy)
+		if (output_file != stdout)
 			fclose(output_file);
 		if (tls != NULL) {
 			tls_close(tls);
@@ -830,8 +824,6 @@ main(int argc, char *argv[])
 		close(sock);
 	}
 
-	if (stdout_copy != NULL)
-		fclose(stdout_copy);
 	tls_config_free(tls_config);
 	imsgbuf_clear(&msgbuf);
 	close(3);

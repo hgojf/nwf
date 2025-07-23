@@ -139,9 +139,12 @@ main(int argc, char *argv[])
 		 * because we have not written to a stdio file and are
 		 * not using atexit(3) handlers.
 		 */
-		for (i = 0; i < 3; i++)
+		for (i = 0; i < 3; i++) {
+			if (i == STDOUT_FILENO && output_file == STDOUT_FILENO)
+				continue;
 			if (dup2(dev_null, i) == -1)
 				err(1, "dup2");
+		}
 		if (dup2(sv[1], 3) == -1)
 			err(1, "dup2");
 		execl(PATH_NWF_ENGINE, "nwf-engine", "-r", NULL);
@@ -168,12 +171,8 @@ main(int argc, char *argv[])
 	}
 	else {
 		if (output_file == STDOUT_FILENO) {
-			int stdout_copy;
-
-			if ((stdout_copy = dup(STDOUT_FILENO)) == -1)
-				err(1, "dup2");
 			if (imsg_compose(&msgbuf, ENGINE_IMSG_FILE_STDOUT, 0, -1,
-					 stdout_copy, NULL, 0) == -1)
+					 -1, NULL, 0) == -1)
 				err(1, "imsg_compose");
 			if (imsgbuf_flush(&msgbuf) == -1)
 				err(1, "imsgbuf_flush");
