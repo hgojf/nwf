@@ -115,7 +115,7 @@ main(int argc, char *argv[])
 					err(1, "%s", output_path);
 			}
 
-			output_dir = open(output_path, O_RDONLY | O_CLOEXEC);
+			output_dir = open(output_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
 			if (output_dir == -1)
 				err(1, "%s", output_path);
 
