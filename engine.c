@@ -770,7 +770,7 @@ main(int argc, char *argv[])
 				if (nread == 0)
 					break;
 
-				if (fwrite(buf, 1, nread, output_file) != nread)
+				if (fwrite(buf, 1, nread, output_file) != (size_t)nread)
 					fatal(1, "fwrite");
 			}
 		}
