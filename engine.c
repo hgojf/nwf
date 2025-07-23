@@ -229,7 +229,7 @@ socket_read_all(int sock, struct tls *tls, void *buf, size_t bufsz)
 	ssize_t n;
 
 	n = socket_read(sock, tls, buf, bufsz);
-	if (n != bufsz)
+	if ((size_t)n != bufsz)
 		fatalx(1, "connection ended early");
 }
 
@@ -775,7 +775,7 @@ main(int argc, char *argv[])
 			}
 		}
 		else if (content_length != -1) {
-			size_t total_read;
+			long long total_read;
 			int last_percent;
 
 			last_percent = 0;
@@ -783,7 +783,7 @@ main(int argc, char *argv[])
 				size_t toread;
 				int percent;
 
-				toread = min(sizeof(buf), content_length - total_read);
+				toread = min((long long)sizeof(buf), content_length - total_read);
 				socket_read_all(sock, tls, buf, toread);
 
 				if (fwrite(buf, 1, toread, output_file) != toread)
