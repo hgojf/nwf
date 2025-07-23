@@ -101,8 +101,6 @@ main(int argc, char *argv[])
 			output_file = STDOUT_FILENO;
 		}
 		else if (argc > 1 || (stat_error != -1 && S_ISDIR(sb.st_mode))) {
-			struct stat sb;
-
 			if (stat_error == -1) {
 				if (mkdir(output_path, 0700) == -1 && errno != EEXIST)
 					err(1, "%s", output_path);
