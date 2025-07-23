@@ -175,7 +175,7 @@ main(int argc, char *argv[])
 
 	for (; *argv != NULL; argv++) {
 		struct imsg msg;
-		int n, output_file_send;
+		int got_progress, n, output_file_send;
 		char path[PATH_MAX], url[ENGINE_URL_MAX];
 		const char *pathp;
 
@@ -299,6 +299,7 @@ main(int argc, char *argv[])
 				err(1, "imsgbuf_flush");
 		}
 
+		got_progress = 0;
 		for (;;) {
 			struct engine_progress progress;
 			char content_length[FMT_SCALED_STRSIZE];
@@ -329,9 +330,13 @@ main(int argc, char *argv[])
 				err(1, "fmt_scaled");
 			fprintf(stderr, "\x1b[K%d%% (%s/%s)\r",
 				progress.percent, total_read, content_length);
+			got_progress = 1;
 
 			imsg_free(&msg);
 		}
+
+		if (got_progress)
+			fprintf(stderr, "\n");
 	}
 
 	imsgbuf_clear(&msgbuf);
