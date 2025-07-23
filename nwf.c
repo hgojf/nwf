@@ -245,7 +245,7 @@ main(int argc, char *argv[])
 		}
 		else {
 			if (need_path)
-				errx(1, "engine sent path when it was not needed");
+				errx(1, "engine didnt send path when it was needed");
 			pathp = output_path;
 		}
 		imsg_free(&msg);
