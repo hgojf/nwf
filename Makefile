@@ -1,4 +1,4 @@
-.PHONY: all clean install
+.PHONY: all clean install tidy
 
 CFLAGS += -DPREFIX=\"$(PREFIX)\"
 CFLAGS += -MD -MP
@@ -44,3 +44,6 @@ MANPATH ?= $(PREFIX)/man
 install:
 	$(INSTALL) -m 0755 nwf $(PREFIX)/bin
 	$(INSTALL) -m 0755 nwf-engine $(PREFIX)/libexec
+
+tidy:
+	clang-tidy $(SRCS_ALL) -- $(CFLAGS)
