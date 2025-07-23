@@ -762,18 +762,6 @@ main(int argc, char *argv[])
 					fatalx(1, "chunk body missing CRLF");
 			}
 		}
-		else if (connection_close) {
-			for (;;) {
-				ssize_t nread;
-
-				nread = socket_read(sock, tls, buf, sizeof(buf));
-				if (nread == 0)
-					break;
-
-				if (fwrite(buf, 1, nread, output_file) != (size_t)nread)
-					fatal(1, "fwrite");
-			}
-		}
 		else if (content_length != -1) {
 			long long total_read;
 			int last_percent;
@@ -800,6 +788,18 @@ main(int argc, char *argv[])
 						fatal(1, "imsgbuf_flush");
 					last_percent = percent;
 				}
+			}
+		}
+		else if (connection_close) {
+			for (;;) {
+				ssize_t nread;
+
+				nread = socket_read(sock, tls, buf, sizeof(buf));
+				if (nread == 0)
+					break;
+
+				if (fwrite(buf, 1, nread, output_file) != (size_t)nread)
+					fatal(1, "fwrite");
 			}
 		}
 		else
