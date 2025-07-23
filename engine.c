@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <imsg.h>
+#include <libgen.h>
 #include <limits.h>
 #include <netdb.h>
 #include <stdarg.h>
@@ -548,11 +549,13 @@ main(int argc, char *argv[])
 		}
 
 		if (need_path) {
-			char path_real[PATH_MAX];
+			char *base, path_real[PATH_MAX];
 
 			if (strlen(path) == 0)
 				fatalx(1, "missing path (use -o)");
-			if (strlcpy(path_real, path, sizeof(path_real))
+			if ((base = basename(path)) == NULL)
+				fatal(1, "%s", path);
+			if (strlcpy(path_real, base, sizeof(path_real))
 				    >= sizeof(path_real))
 				fatalx(1, "output path too long");
 			if (imsg_compose(&msgbuf, ENGINE_IMSG_PATH, 0, -1, -1,
