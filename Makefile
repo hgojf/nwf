@@ -1,5 +1,6 @@
 .PHONY: all clean
 
+CFLAGS += -MD -MP
 CFLAGS += -Wall -Wextra
 CFLAGS += -std=c99 -pedantic
 
@@ -14,6 +15,8 @@ OBJS_NWF = $(SRCS_NWF:.c=.o)
 nwf: $(OBJS_NWF)
 	$(CC) -o $@ $(LDFLAGS_NWF) $(OBJS_NWF)
 
+-include $(DEPS_NWF)
+
 LDFLAGS_ENGINE = -ltls -lutil
 SRCS_ENGINE = imsg-blocking.c engine.c
 
@@ -22,6 +25,8 @@ OBJS_ENGINE = $(SRCS_ENGINE:.c=.o)
 
 nwf-engine: $(OBJS_ENGINE)
 	$(CC) -o $@ $(LDFLAGS_ENGINE) $(OBJS_ENGINE)
+
+-include $(DEPS_ENGINE)
 
 BINARIES = nwf nwf-engine
 SRCS_ALL = engine.c imsg-blocking.c nwf.c
