@@ -1,0 +1,372 @@
+#include <sys/queue.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+
+#include <ctype.h>
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <imsg.h>
+#include <limits.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "engine.h"
+#include "imsg-blocking.h"
+#include "pathnames.h"
+
+static void
+engine_errx(int ex, struct imsg *msg)
+{
+	size_t i;
+	char buf[ENGINE_ERROR_MAX];
+
+	if (imsg_get_data(msg, buf, sizeof(buf)) == -1)
+		errx(1, "engine sent data with wrong size");
+	if (memchr(buf, '\0', sizeof(buf)) == NULL)
+		errx(1, "engine sent string without null terminator");
+	for (i = 0; buf[i] != '\0'; i++)
+		if (!isprint(buf[i]) && !isspace(buf[i]))
+			errx(1, "engine sent error message with nonprinting characters");
+
+	fprintf(stderr, "nwf-engine: %s\n", buf);
+	exit(ex);
+}
+
+/*
+ * XXX: output files and directories are currently created as 0700.
+ * This seems a bit restrictive. What is the correct mode to use?
+ */
+
+static void
+usage(void)
+{
+	fprintf(stderr, "usage: nwf [-o directory] [url ...]\n");
+	fprintf(stderr, "usage: nwf [-o file] url\n");
+	exit(2);
+}
+
+int
+main(int argc, char *argv[])
+{
+	struct imsgbuf msgbuf;
+	const char *output_path;
+	int ch, dev_null, i, need_path, output_dir, output_file, sv[2];
+
+	output_path = NULL;
+	while ((ch = getopt(argc, argv, "o:")) != -1) {
+		switch (ch) {
+		case 'o':
+			output_path = optarg;
+			break;
+		default:
+			usage();
+		}
+	}
+
+	argc -= optind;
+	argv += optind;
+
+	if (argc == 0)
+		usage();
+
+	output_dir = AT_FDCWD;
+	output_file = -1;
+
+	if (output_path != NULL) {
+		struct stat sb;
+		char *trailing_slash;
+		int stat_error;
+
+		if ((trailing_slash = strrchr(output_path, '/')) != NULL
+		    && trailing_slash[1] == '\0')
+			*trailing_slash = '\0';
+
+		stat_error = stat(output_path, &sb);
+		if (stat_error == -1) {
+			switch (errno) {
+			case ENOENT:
+				break;
+			default:
+				err(1, "%s", output_path);
+			}
+		}
+
+		if (!strcmp(output_path, "-")) {
+			if (argc > 1)
+				errx(1, "cannot output multiple files to stdout");
+			output_file = STDOUT_FILENO;
+		}
+		else if (argc > 1 || (stat_error != -1 && S_ISDIR(sb.st_mode))) {
+			struct stat sb;
+
+			if (stat_error == -1) {
+				if (mkdir(output_path, 0700) == -1 && errno != EEXIST)
+					err(1, "%s", output_path);
+			}
+
+			output_dir = open(output_path, O_RDONLY | O_CLOEXEC);
+			if (output_dir == -1)
+				err(1, "%s", output_path);
+
+			fprintf(stderr, "outputting to %s directory\n", output_path);
+		}
+		else {
+			output_file = open(output_path,
+					   O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+					   0700);
+			if (output_file == -1)
+				err(1, "%s", output_path);
+		}
+	}
+
+	if ((dev_null = open(PATH_DEV_NULL, O_RDWR | O_CLOEXEC)) == -1)
+		err(1, "%s", PATH_DEV_NULL);
+
+	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, PF_UNSPEC, sv) == -1)
+		err(1, "socketpair");
+	if (imsgbuf_init(&msgbuf, sv[0]) == -1)
+		err(1, "imsgbuf_init");
+	imsgbuf_allow_fdpass(&msgbuf);
+	switch (fork()) {
+	case -1:
+		err(1, "fork");
+	case 0:
+		/*
+		 * It is okay to call err(3) here (which calls exit(3)),
+		 * because we have not written to a stdio file and are
+		 * not using atexit(3) handlers.
+		 */
+		for (i = 0; i < 3; i++)
+			if (dup2(dev_null, i) == -1)
+				err(1, "dup2");
+		if (dup2(sv[1], 3) == -1)
+			err(1, "dup2");
+		execl(PATH_NWF_ENGINE, "nwf-engine", "-r", NULL);
+		err(1, "%s", PATH_NWF_ENGINE);
+	default:
+		break;
+	}
+	close(dev_null);
+	close(sv[1]);
+
+	signal(SIGPIPE, SIG_IGN);
+
+	if (output_file == -1) {
+		if (output_dir == AT_FDCWD) {
+			if (unveil(".", "cw") == -1)
+				err(1, ".");
+		}
+		else {
+			if (unveil(output_path, "cw") == -1)
+				err(1, "%s", output_path);
+		}
+		if (pledge("stdio cpath wpath sendfd", NULL) == -1)
+			err(1, "pledge");
+	}
+	else {
+		if (output_file == STDOUT_FILENO) {
+			int stdout_copy;
+
+			if ((stdout_copy = dup(STDOUT_FILENO)) == -1)
+				err(1, "dup2");
+			if (imsg_compose(&msgbuf, ENGINE_IMSG_FILE_STDOUT, 0, -1,
+					 stdout_copy, NULL, 0) == -1)
+				err(1, "imsg_compose");
+			if (imsgbuf_flush(&msgbuf) == -1)
+				err(1, "imsgbuf_flush");
+
+			if (pledge("stdio", NULL) == -1)
+				err(1, "pledge");
+		}
+		else {
+			if (pledge("stdio sendfd", NULL) == -1)
+				err(1, "pledge");
+		}
+	}
+
+	need_path = (output_file == -1);
+	if (imsg_compose(&msgbuf, ENGINE_IMSG_NEED_PATH, 0, -1, -1,
+			 &need_path, sizeof(need_path)) == -1)
+		err(1, "imsg_compose");
+	if (imsgbuf_flush(&msgbuf) == -1)
+		err(1, "imsgbuf_flush");
+
+	for (; *argv != NULL; argv++) {
+		struct imsg msg;
+		int n, output_file_send;
+		char path[PATH_MAX], url[ENGINE_URL_MAX];
+		const char *pathp;
+
+		if (strlcpy(url, *argv, sizeof(url))
+			    >= sizeof(url))
+			errx(1, "url '%s' too long", *argv);
+
+		if (imsg_compose(&msgbuf, ENGINE_IMSG_DOWNLOAD, 0, -1, -1,
+				 url, sizeof(url)) == -1)
+			err(1, "imsg_compose");
+		if (imsgbuf_flush(&msgbuf) == -1)
+			err(1, "imsgbuf_flush");
+
+		for (;;) {
+			char url[ENGINE_URL_MAX];
+
+			n = imsg_get_blocking(&msgbuf, &msg);
+			if (n == -1)
+				err(1, "imsg_get_blocking");
+			if (n == 0)
+				errx(1, "imsg_get_blocking EOF");
+			if (imsg_get_type(&msg) == ENGINE_IMSG_ERROR)
+				engine_errx(1, &msg);
+
+			if (imsg_get_type(&msg) == ENGINE_IMSG_PATH)
+				break;
+			if (imsg_get_type(&msg) == ENGINE_IMSG_REDIRECT_OVER)
+				break;
+
+			if (imsg_get_type(&msg) != ENGINE_IMSG_REDIRECT)
+				errx(1, "engine sent unknown imsg type");
+
+			if (imsg_get_data(&msg, url, sizeof(url)) == -1)
+				errx(1, "client sent data with wrong size");
+			if (memchr(url, '\0', sizeof(url)) == NULL)
+				errx(1, "client sent string without null terminator");
+			fprintf(stderr, "Redirected to %s\n", url);
+
+			imsg_free(&msg);
+		}
+
+		/*
+		 * We got an imsg from the loop.
+		 */
+		if (imsg_get_type(&msg) == ENGINE_IMSG_PATH) {
+			size_t i;
+			char *dotdot;
+
+			if (!need_path)
+				errx(1, "engine sent path when it was not needed");
+			if (imsg_get_data(&msg, path, sizeof(path)) == -1)
+				errx(1, "engine sent data with wrong size");
+			if (memchr(path, '\0', sizeof(path)) == NULL)
+				errx(1, "engine sent string without null terminator");
+			if (path[0] == '/')
+				errx(1, "engine sent absolute path");
+			dotdot = path;
+			while ((dotdot = strstr(dotdot, "..")) != NULL) {
+				if (dotdot[2] == '/' || dotdot[2] == '\0')
+					errx(1, "engine sent relative path");
+				dotdot += 3;
+			}
+			for (i = 0; path[i] != '\0'; i++)
+				if (!isprint(path[i]) && !isspace(path[i]))
+					errx(1, "engine sent path with nonprinting characters");
+			pathp = path;
+		}
+		else {
+			if (need_path)
+				errx(1, "engine sent path when it was not needed");
+			pathp = output_path;
+		}
+		imsg_free(&msg);
+
+		if (output_file == -1) {
+			if ((output_file_send = openat(output_dir, pathp,
+						  O_WRONLY | O_CREAT | O_EXCL | O_TRUNC,
+						  0700)) == -1) {
+				if (errno == EEXIST) {
+					int ch;
+
+					if (output_dir == AT_FDCWD)
+						fprintf(stderr, "file %s exists, overwrite? (y/n) ", pathp);
+					else {
+						fprintf(stderr, "file %s/%s exists, overwrite? (y/n) ",
+							output_path, pathp);
+					}
+
+					ch = fgetc(stdin);
+					switch (ch) {
+					case 'n':
+						if ((ch = fgetc(stdin)) != EOF && ch != '\n')
+							errx(1, "invalid response");
+						errx(1, "not saving file");
+					case 'y':
+						if ((ch = fgetc(stdin)) != EOF && ch != '\n')
+							errx(1, "invalid response");
+						break;
+					default:
+						errx(1, "invalid response");
+					}
+
+					output_file_send = openat(output_dir, pathp,
+								 O_WRONLY | O_CREAT | O_TRUNC,
+								 0700);
+					if (output_file_send == -1) {
+						if (output_dir == AT_FDCWD)
+							err(1, "%s", pathp);
+						else
+							err(1, "%s/%s", output_path, pathp);
+					}
+				}
+				else if (output_dir == AT_FDCWD)
+					err(1, "%s", pathp);
+				else
+					err(1, "%s/%s", output_path, pathp);
+			}
+		}
+		else {
+			output_file_send = output_file;
+		}
+
+		if (output_dir == AT_FDCWD) {
+			if (output_file == STDOUT_FILENO)
+				fprintf(stderr, "saving file to stdout\n");
+			else
+				fprintf(stderr, "saving file to %s\n", pathp);
+		}
+		else
+			fprintf(stderr, "saving file to %s/%s\n", output_path, pathp);
+
+		if (output_file_send != STDOUT_FILENO) {
+			if (imsg_compose(&msgbuf, ENGINE_IMSG_FILE, 0,
+					 -1, output_file_send, NULL, 0) == -1)
+				err(1, "imsg_compose");
+			if (imsgbuf_flush(&msgbuf) == -1)
+				err(1, "imsgbuf_flush");
+		}
+
+		for (;;) {
+			unsigned int percent;
+
+			n = imsg_get_blocking(&msgbuf, &msg);
+			if (n == -1)
+				err(1, "imsg_get_blocking");
+			if (n == 0)
+				errx(1, "imsg_get_blocking EOF");
+
+			if (imsg_get_type(&msg) == ENGINE_IMSG_ERROR)
+				engine_errx(1, &msg);
+			if (imsg_get_type(&msg) == ENGINE_IMSG_DOWNLOAD_OVER) {
+				imsg_free(&msg);
+				break;
+			}
+
+			if (imsg_get_type(&msg) != ENGINE_IMSG_PROGRESS)
+				errx(1, "engine sent unknown imsg type");
+			if (imsg_get_data(&msg, &percent, sizeof(percent)) == -1)
+				errx(1, "engine sent data with wrong size");
+			if (percent > 100)
+				errx(1, "engine sent percentage greater than 100%%");
+			fprintf(stderr, "\x1b[K%d%%\r", percent);
+
+			imsg_free(&msg);
+		}
+	}
+
+	if (output_dir != AT_FDCWD)
+		close(output_dir);
+	imsgbuf_clear(&msgbuf);
+	close(sv[0]);
+}
