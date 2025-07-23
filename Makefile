@@ -1,6 +1,7 @@
 .PHONY: all clean
 
 CFLAGS += -Wall -Wextra
+CFLAGS += -std=c99 -pedantic
 
 all: nwf nwf-engine
 

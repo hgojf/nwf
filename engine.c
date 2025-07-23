@@ -215,7 +215,7 @@ socket_read(int sock, struct tls *tls, void *buf, size_t bufsz)
 			socket_fatal(1, tls, SOCKET_ERR_READ);
 		if (n == 0)
 			break;
-		buf += n;
+		buf = (char *)buf + n;
 		bufsz -= n;
 		nread += n;
 	}
