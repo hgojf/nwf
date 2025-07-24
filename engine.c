@@ -550,6 +550,7 @@ main(int argc, char *argv[])
 				fatalx(1, "missing path (use -o)");
 			if ((base = basename(path)) == NULL)
 				fatal(1, "%s", path);
+			memset(path_real, 0, sizeof(path_real));
 			if (strlcpy(path_real, base, sizeof(path_real))
 				    >= sizeof(path_real))
 				fatalx(1, "output path too long");

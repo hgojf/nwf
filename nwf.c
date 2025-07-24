@@ -179,6 +179,7 @@ main(int argc, char *argv[])
 		char path[PATH_MAX], url[ENGINE_URL_MAX];
 		const char *pathp;
 
+		memset(url, 0, sizeof(url));
 		if (strlcpy(url, *argv, sizeof(url))
 			    >= sizeof(url))
 			errx(1, "url '%s' too long", *argv);
