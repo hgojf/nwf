@@ -86,11 +86,8 @@ main(int argc, char *argv[])
 		    && trailing_slash[1] == '\0')
 			*trailing_slash = '\0';
 
-		if (!strcmp(output_path, "-")) {
-			if (argc > 1)
-				errx(1, "cannot output multiple files to stdout");
+		if (!strcmp(output_path, "-"))
 			output_file = STDOUT_FILENO;
-		}
 		else {
 			output_file = open(output_path,
 					   O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
