@@ -37,11 +37,6 @@ engine_errx(int ex, struct imsg *msg)
 	exit(ex);
 }
 
-/*
- * XXX: output files and directories are currently created as 0700.
- * This seems a bit restrictive. What is the correct mode to use?
- */
-
 static void
 usage(void)
 {
@@ -99,7 +94,7 @@ main(int argc, char *argv[])
 		else {
 			output_file = open(output_path,
 					   O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
-					   0700);
+					   0644);
 			if (output_file == -1)
 				err(1, "%s", output_path);
 		}
@@ -254,7 +249,7 @@ main(int argc, char *argv[])
 		if (output_file == -1) {
 			if ((output_file_send = open(pathp,
 						  O_WRONLY | O_CREAT | O_EXCL | O_TRUNC,
-						  0700)) == -1) {
+						  0644)) == -1) {
 				if (errno == EEXIST) {
 					int ch;
 
@@ -276,7 +271,7 @@ main(int argc, char *argv[])
 
 					output_file_send = open(pathp,
 								 O_WRONLY | O_CREAT | O_TRUNC,
-								 0700);
+								 0644);
 					if (output_file_send == -1)
 						err(1, "%s", pathp);
 				}
