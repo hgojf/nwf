@@ -283,13 +283,8 @@ main(int argc, char *argv[])
 		exit(1);
 	imsgbuf_allow_fdpass(&msgbuf);
 
-	errno = 0;
-	tls_config = tls_config_new();
-	if (tls_config == NULL) {
-		if (errno == ENOMEM)
-			fatal(1, NULL);
+	if ((tls_config = tls_config_new()) == NULL)
 		fatalx(1, "tls_config_new");
-	}
 	if (tls_config_set_ca_file(tls_config, tls_default_ca_cert_file()) == -1)
 		tls_config_fatal(1, tls_config, "tls_config_set_ca_file");
 
@@ -404,12 +399,8 @@ main(int argc, char *argv[])
 				}
 
 				if (!strcmp(proto, "https")) {
-					errno = 0;
-					if ((tls = tls_client()) == NULL) {
-						if (errno == ENOMEM)
-							fatal(1, NULL);
+					if ((tls = tls_client()) == NULL)
 						fatalx(1, "tls_client");
-					}
 					if (tls_configure(tls, tls_config) == -1)
 						tls_config_fatal(1, tls_config, "tls_configure");
 					if (tls_connect_socket(tls, sock, host) == -1)
