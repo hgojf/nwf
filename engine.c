@@ -340,7 +340,7 @@ main(int argc, char *argv[])
 		struct tls *tls;
 		FILE *output_file;
 		char buf[4096], *path, url[ENGINE_URL_MAX];
-		long long content_length;
+		long long content_length, total_read;
 		int chunked, connection_close, sock;
 
 		n = imsg_get_blocking(&msgbuf, &msg);
@@ -718,7 +718,17 @@ main(int argc, char *argv[])
 		}
 		done_headers:
 
+		if (imsg_compose(&msgbuf, ENGINE_IMSG_LENGTH, 0, -1, -1,
+				 &content_length, sizeof(content_length)) == -1)
+			fatal(1, "imsg_compose");
+		if (imsgbuf_flush(&msgbuf) == -1)
+			fatal(1, "imsgbuf_flush");
+
 		if (chunked) {
+			long long last_update;
+
+			total_read = 0;
+			last_update = 0;
 			for (;;) {
 				size_t nread;
 				unsigned long long size;
@@ -760,6 +770,7 @@ main(int argc, char *argv[])
 				if (size == 0)
 					break; /* ignore trailer */
 
+				total_read += size;
 				while (size != 0) {
 					size_t toread;
 
@@ -773,16 +784,24 @@ main(int argc, char *argv[])
 
 				if (socket_getc(sock, tls) != '\r' || socket_getc(sock, tls) != '\n')
 					fatalx(1, "chunk body missing CRLF");
+
+				if (total_read - last_update > 4096) {
+					if (imsg_compose(&msgbuf, ENGINE_IMSG_PROGRESS,
+							 0, -1, -1, &total_read,
+							 sizeof(total_read)) == -1)
+						fatal(1, "imsg_compose");
+					if (imsgbuf_flush(&msgbuf) == -1)
+						fatal(1, "imsgbuf_flush");
+					last_update = total_read;
+				}
 			}
 		}
 		else if (content_length != -1) {
-			long long total_read;
-			int last_percent;
+			long long last_update;
 
-			last_percent = 0;
+			last_update = 0;
 			for (total_read = 0; total_read < content_length;) {
 				size_t toread;
-				int percent;
 
 				toread = min((long long)sizeof(buf), content_length - total_read);
 				socket_read_all(sock, tls, buf, toread);
@@ -791,26 +810,22 @@ main(int argc, char *argv[])
 					fatal(1, "fwrite");
 				total_read += toread;
 
-				percent = (total_read * 100) / content_length;
-				if (percent != last_percent) {
-					struct engine_progress progress;
-
-					memset(&progress, 0, sizeof(progress));
-					progress.content_length = content_length;
-					progress.percent = percent;
-					progress.total_read = total_read;
-
+				if (total_read - last_update > 4096) {
 					if (imsg_compose(&msgbuf, ENGINE_IMSG_PROGRESS,
-							 0, -1, -1, &progress,
-							 sizeof(progress)) == -1)
+							 0, -1, -1, &total_read,
+							 sizeof(total_read)) == -1)
 						fatal(1, "imsg_compose");
 					if (imsgbuf_flush(&msgbuf) == -1)
 						fatal(1, "imsgbuf_flush");
-					last_percent = percent;
+					last_update = total_read;
 				}
 			}
 		}
 		else if (connection_close) {
+			long long last_update;
+
+			last_update = 0;
+			total_read = 0;
 			for (;;) {
 				ssize_t nread;
 
@@ -820,13 +835,26 @@ main(int argc, char *argv[])
 
 				if (fwrite(buf, 1, nread, output_file) != (size_t)nread)
 					fatal(1, "fwrite");
+				total_read += nread;
+
+				if (total_read - last_update > 4096) {
+					if (imsg_compose(&msgbuf, ENGINE_IMSG_PROGRESS,
+							 0, -1, -1,
+							 &total_read,
+							 sizeof(total_read)) == -1)
+						fatal(1, "imsg_compose");
+					if (imsgbuf_flush(&msgbuf) == -1)
+						fatal(1, "imsgbuf_flush");
+					last_update = total_read;
+				}
 			}
 		}
 		else
 			fatalx(1, "no content framing specified");
 
 		if (imsg_compose(&msgbuf, ENGINE_IMSG_DOWNLOAD_OVER, 0,
-				 -1, -1, NULL, 0) == -1)
+				 -1, -1, &total_read,
+				 sizeof(total_read)) == -1)
 			fatal(1, "imsg_compose");
 		if (imsgbuf_flush(&msgbuf) == -1)
 			fatal(1, "imsgbuf_flush");

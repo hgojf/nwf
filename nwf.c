@@ -178,7 +178,9 @@ main(int argc, char *argv[])
 
 	for (; *argv != NULL; argv++) {
 		struct imsg msg;
+		long long content_length;
 		int got_progress, n;
+		char content_length_str[FMT_SCALED_STRSIZE];
 		char url[ENGINE_URL_MAX];
 
 		memset(url, 0, sizeof(url));
@@ -302,11 +304,30 @@ main(int argc, char *argv[])
 
 		imsg_free(&msg);
 
+		n = imsg_get_blocking(&msgbuf, &msg);
+		if (n == -1)
+			err(1, "imsg_get_blocking");
+		if (n == 0)
+			errx(1, "imsg_get_blocking EOF");
+		if (imsg_get_type(&msg) != ENGINE_IMSG_LENGTH)
+			errx(1, "engine sent unknown imsg type");
+		if (imsg_get_data(&msg, &content_length, sizeof(content_length)) == -1)
+			errx(1, "engine sent data with wrong size");
+		if (content_length == 0)
+			errx(1, "engine sent content length of 0");
+		if (content_length != -1) {
+			if (fmt_scaled(content_length, content_length_str) == -1)
+				err(1, "fmt_scaled");
+			fprintf(stderr, "0%% (0/%s)\r", content_length_str);
+		}
+		else {
+			fprintf(stderr, "0B downloaded\r");
+		}
+
 		got_progress = 0;
 		for (;;) {
-			struct engine_progress progress;
-			char content_length[FMT_SCALED_STRSIZE];
-			char total_read[FMT_SCALED_STRSIZE];
+			long long total_read;
+			char total_read_str[FMT_SCALED_STRSIZE];
 
 			n = imsg_get_blocking(&msgbuf, &msg);
 			if (n == -1)
@@ -316,24 +337,33 @@ main(int argc, char *argv[])
 
 			if (imsg_get_type(&msg) == ENGINE_IMSG_ERROR)
 				engine_errx(1, url, &msg);
+			switch (imsg_get_type(&msg)) {
+			case ENGINE_IMSG_DOWNLOAD_OVER:
+			case ENGINE_IMSG_PROGRESS:
+				break;
+			default:
+				errx(1, "engine sent unknown imsg type");
+			}
+			if (imsg_get_data(&msg, &total_read, sizeof(total_read)) == -1)
+				errx(1, "engine sent data with wrong size");
+			if (fmt_scaled(total_read, total_read_str) == -1)
+				err(1, "fmt_scaled");
+			if (content_length != -1) {
+				unsigned int percent;
+
+				percent = (total_read * 100) / content_length;
+				fprintf(stderr, "\x1b[K%d%% (%s/%s)\r",
+					percent, total_read_str, content_length_str);
+			}
+			else {
+				fprintf(stderr, "\x1b[K%s downloaded\r", total_read_str);
+			}
+			got_progress = 1;
+
 			if (imsg_get_type(&msg) == ENGINE_IMSG_DOWNLOAD_OVER) {
 				imsg_free(&msg);
 				break;
 			}
-
-			if (imsg_get_type(&msg) != ENGINE_IMSG_PROGRESS)
-				errx(1, "engine sent unknown imsg type");
-			if (imsg_get_data(&msg, &progress, sizeof(progress)) == -1)
-				errx(1, "engine sent data with wrong size");
-			if (progress.percent > 100)
-				errx(1, "engine sent percentage greater than 100%%");
-			if (fmt_scaled(progress.content_length, content_length) == -1)
-				err(1, "fmt_scaled");
-			if (fmt_scaled(progress.total_read, total_read) == -1)
-				err(1, "fmt_scaled");
-			fprintf(stderr, "\x1b[K%d%% (%s/%s)\r",
-				progress.percent, total_read, content_length);
-			got_progress = 1;
 
 			imsg_free(&msg);
 		}
