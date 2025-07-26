@@ -193,6 +193,7 @@ main(int argc, char *argv[])
 			err(1, "imsgbuf_flush");
 
 		for (;;) {
+			size_t i;
 			char redirect[ENGINE_URL_MAX];
 
 			n = imsg_get_blocking(&msgbuf, &msg);
@@ -215,6 +216,9 @@ main(int argc, char *argv[])
 				errx(1, "client sent data with wrong size");
 			if (memchr(redirect, '\0', sizeof(redirect)) == NULL)
 				errx(1, "client sent string without null terminator");
+			for (i = 0; redirect[i] != '\0'; i++)
+				if (!isprint(redirect[i]) && !isspace(redirect[i]))
+					errx(1, "engine sent redirect with nonprinting characters");
 			fprintf(stderr, "Redirected to %s\n", redirect);
 
 			imsg_free(&msg);
