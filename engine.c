@@ -342,7 +342,7 @@ main(int argc, char *argv[])
 
 		for (;;) {
 			struct addrinfo hints, *res, *res0;
-			char code[4], *host, *proto, *s, version[9];
+			char code[4], *host, *port, *proto, *s, version[9];
 			int error, save_errno;
 
 			redirected:
@@ -366,12 +366,19 @@ main(int argc, char *argv[])
 				path = "";
 			host = s;
 
+			if ((port = strchr(host, ':')) != NULL) {
+				*port++ = '\0';
+			}
+			else {
+				port = proto;
+			}
+
 			memset(&hints, 0, sizeof(hints));
 			hints.ai_family = AF_UNSPEC;
 			hints.ai_socktype = SOCK_STREAM;
 			hints.ai_protocol = IPPROTO_TCP;
 
-			error = getaddrinfo(host, proto, &hints, &res0);
+			error = getaddrinfo(host, port, &hints, &res0);
 			if (error != 0)
 				fatalx(1, "%s: %s", host, gai_strerror(error));
 
