@@ -127,14 +127,8 @@ main(int argc, char *argv[])
 
 	}
 	else {
-		char *trailing_slash;
-
 		if (argc > 1)
 			errx(1, "cannot specify -o with multiple urls");
-
-		if ((trailing_slash = strrchr(output_path, '/')) != NULL
-		    && trailing_slash[1] == '\0')
-			*trailing_slash = '\0';
 
 		if (output_stdout) {
 			if (pledge("stdio", NULL) == -1)
