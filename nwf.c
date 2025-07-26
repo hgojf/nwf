@@ -20,7 +20,7 @@
 #include "pathnames.h"
 
 static void
-engine_errx(int ex, struct imsg *msg)
+engine_errx(int ex, const char *url, struct imsg *msg)
 {
 	size_t i;
 	char buf[ENGINE_ERROR_MAX];
@@ -33,7 +33,7 @@ engine_errx(int ex, struct imsg *msg)
 		if (!isprint(buf[i]) && !isspace(buf[i]))
 			errx(1, "engine sent error message with nonprinting characters");
 
-	fprintf(stderr, "nwf-engine: %s\n", buf);
+	fprintf(stderr, "nwf-engine: error retrieving %s: %s\n", url, buf);
 	exit(ex);
 }
 
@@ -177,7 +177,7 @@ main(int argc, char *argv[])
 			err(1, "imsgbuf_flush");
 
 		for (;;) {
-			char url[ENGINE_URL_MAX];
+			char redirect[ENGINE_URL_MAX];
 
 			n = imsg_get_blocking(&msgbuf, &msg);
 			if (n == -1)
@@ -185,7 +185,7 @@ main(int argc, char *argv[])
 			if (n == 0)
 				errx(1, "imsg_get_blocking EOF");
 			if (imsg_get_type(&msg) == ENGINE_IMSG_ERROR)
-				engine_errx(1, &msg);
+				engine_errx(1, url, &msg);
 
 			if (imsg_get_type(&msg) == ENGINE_IMSG_PATH)
 				break;
@@ -195,11 +195,11 @@ main(int argc, char *argv[])
 			if (imsg_get_type(&msg) != ENGINE_IMSG_REDIRECT)
 				errx(1, "engine sent unknown imsg type");
 
-			if (imsg_get_data(&msg, url, sizeof(url)) == -1)
+			if (imsg_get_data(&msg, redirect, sizeof(redirect)) == -1)
 				errx(1, "client sent data with wrong size");
-			if (memchr(url, '\0', sizeof(url)) == NULL)
+			if (memchr(redirect, '\0', sizeof(redirect)) == NULL)
 				errx(1, "client sent string without null terminator");
-			fprintf(stderr, "Redirected to %s\n", url);
+			fprintf(stderr, "Redirected to %s\n", redirect);
 
 			imsg_free(&msg);
 		}
@@ -295,7 +295,7 @@ main(int argc, char *argv[])
 				errx(1, "imsg_get_blocking EOF");
 
 			if (imsg_get_type(&msg) == ENGINE_IMSG_ERROR)
-				engine_errx(1, &msg);
+				engine_errx(1, url, &msg);
 			if (imsg_get_type(&msg) == ENGINE_IMSG_DOWNLOAD_OVER) {
 				imsg_free(&msg);
 				break;
