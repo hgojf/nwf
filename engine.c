@@ -274,7 +274,8 @@ main(int argc, char *argv[])
 {
 	struct imsg msg;
 	struct tls_config *tls_config;
-	int n, need_path, output_stdout;
+	FILE *output_file_orig;
+	int n;
 
 	if (argc != 2 || strcmp(argv[1], "-r") != 0)
 		errx(1, "nwf-engine should not be run directly");
@@ -297,27 +298,26 @@ main(int argc, char *argv[])
 	if (n == 0)
 		fatalx(1, "imsg_get_blocking EOF");
 	if (imsg_get_type(&msg) == ENGINE_IMSG_FILE_STDOUT) {
-		output_stdout = 1;
-		imsg_free(&msg);
+		if (pledge("stdio inet dns", NULL) == -1)
+			fatal(1, "pledge");
+		output_file_orig = stdout;
+	}
+	else if (imsg_get_type(&msg) == ENGINE_IMSG_FILE) {
+		int output_fd;
 
 		if (pledge("stdio inet dns", NULL) == -1)
 			fatal(1, "pledge");
 
-		n = imsg_get_blocking(&msgbuf, &msg);
-		if (n == -1)
-			fatal(1, "imsg_get_blocking");
-		if (n == 0)
-			fatalx(1, "imsg_get_blocking EOF");
+		if ((output_fd = imsg_get_fd(&msg)) == -1)
+			errx(1, "parent sent file message without fd");
+		if ((output_file_orig = fdopen(output_fd, "w")) == NULL)
+			err(1, "fdopen");
 	}
-	else {
-		output_stdout = 0;
+	else if (imsg_get_type(&msg) == ENGINE_IMSG_NEED_PATH) {
+		output_file_orig = NULL;
 	}
-	if (imsg_get_type(&msg) != ENGINE_IMSG_NEED_PATH)
+	else
 		fatalx(1, "parent sent unknown imsg type");
-	if (imsg_get_data(&msg, &need_path, sizeof(need_path)) == -1)
-		fatalx(1, "parent sent data of wrong size");
-	if (need_path != 0 && need_path != 1)
-		fatalx(1, "parent sent invalid boolean");
 	imsg_free(&msg);
 
 	for (;;) {
@@ -541,7 +541,7 @@ main(int argc, char *argv[])
 
 		}
 
-		if (need_path) {
+		if (output_file_orig == NULL) {
 			char *base, path_real[PATH_MAX];
 
 			if (strlen(path) == 0)
@@ -564,7 +564,7 @@ main(int argc, char *argv[])
 		if (imsgbuf_flush(&msgbuf) == -1)
 			fatal(1, "imsgbuf_flush");
 
-		if (!output_stdout) {
+		if (output_file_orig == NULL) {
 			int output_fd;
 
 			n = imsg_get_blocking(&msgbuf, &msg);
@@ -581,7 +581,7 @@ main(int argc, char *argv[])
 			imsg_free(&msg);
 		}
 		else {
-			output_file = stdout;
+			output_file = output_file_orig;
 		}
 
 		chunked = 0;
@@ -824,6 +824,8 @@ main(int argc, char *argv[])
 		close(sock);
 	}
 
+	if (output_file_orig != NULL && output_file_orig != stdout)
+		fclose(output_file_orig);
 	tls_config_free(tls_config);
 	imsgbuf_clear(&msgbuf);
 	close(3);

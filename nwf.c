@@ -49,7 +49,7 @@ main(int argc, char *argv[])
 {
 	struct imsgbuf msgbuf;
 	const char *engine_path, *output_path;
-	int ch, dev_null, i, need_path, output_file, sv[2];
+	int ch, dev_null, i, need_path, output_stdout, sv[2];
 
 	/*
 	 * Cant use getprogname(3) because it will remove the "./"
@@ -76,29 +76,7 @@ main(int argc, char *argv[])
 	if (argc == 0)
 		usage();
 
-	if (output_path != NULL) {
-		char *trailing_slash;
-
-		if (argc > 1)
-			errx(1, "cannot specify -o with multiple urls");
-
-		if ((trailing_slash = strrchr(output_path, '/')) != NULL
-		    && trailing_slash[1] == '\0')
-			*trailing_slash = '\0';
-
-		if (!strcmp(output_path, "-"))
-			output_file = STDOUT_FILENO;
-		else {
-			output_file = open(output_path,
-					   O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
-					   0644);
-			if (output_file == -1)
-				err(1, "%s", output_path);
-		}
-	}
-	else {
-		output_file = -1;
-	}
+	output_stdout = (output_path != NULL && !strcmp(output_path, "-"));
 
 	if ((dev_null = open(PATH_DEV_NULL, O_RDWR | O_CLOEXEC)) == -1)
 		err(1, "%s", PATH_DEV_NULL);
@@ -118,7 +96,7 @@ main(int argc, char *argv[])
 		 * not using atexit(3) handlers.
 		 */
 		for (i = 0; i < 3; i++) {
-			if (i == STDOUT_FILENO && output_file == STDOUT_FILENO)
+			if (i == STDOUT_FILENO && output_stdout)
 				continue;
 			if (dup2(dev_null, i) == -1)
 				err(1, "dup2");
@@ -135,41 +113,63 @@ main(int argc, char *argv[])
 
 	signal(SIGPIPE, SIG_IGN);
 
-	if (output_file == -1) {
+	if (output_path == NULL) {
 		if (unveil(".", "cw") == -1)
 			err(1, ".");
 		if (pledge("stdio cpath wpath sendfd", NULL) == -1)
 			err(1, "pledge");
+		if (imsg_compose(&msgbuf, ENGINE_IMSG_NEED_PATH, 0, -1, -1,
+				 NULL, 0) == -1)
+			err(1, "imsg_compose");
+		if (imsgbuf_flush(&msgbuf) == -1)
+			err(1, "imsgbuf_flush");
+		need_path = 1;
+
 	}
 	else {
-		if (output_file == STDOUT_FILENO) {
+		char *trailing_slash;
+
+		if (argc > 1)
+			errx(1, "cannot specify -o with multiple urls");
+
+		if ((trailing_slash = strrchr(output_path, '/')) != NULL
+		    && trailing_slash[1] == '\0')
+			*trailing_slash = '\0';
+
+		if (output_stdout) {
+			if (pledge("stdio", NULL) == -1)
+				err(1, "pledge");
 			if (imsg_compose(&msgbuf, ENGINE_IMSG_FILE_STDOUT, 0, -1,
 					 -1, NULL, 0) == -1)
 				err(1, "imsg_compose");
 			if (imsgbuf_flush(&msgbuf) == -1)
 				err(1, "imsgbuf_flush");
+		}
+		else {
+			int output_file;
 
+			output_file = open(output_path,
+					   O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+					   0644);
+			if (output_file == -1)
+				err(1, "%s", output_path);
+
+			if (imsg_compose(&msgbuf, ENGINE_IMSG_FILE, 0, -1,
+					 output_file, NULL, 0) == -1)
+				err(1, "imsg_compose");
+			if (imsgbuf_flush(&msgbuf) == -1)
+				err(1, "imsgbuf_flush");
 			if (pledge("stdio", NULL) == -1)
 				err(1, "pledge");
 		}
-		else {
-			if (pledge("stdio sendfd", NULL) == -1)
-				err(1, "pledge");
-		}
-	}
 
-	need_path = (output_file == -1);
-	if (imsg_compose(&msgbuf, ENGINE_IMSG_NEED_PATH, 0, -1, -1,
-			 &need_path, sizeof(need_path)) == -1)
-		err(1, "imsg_compose");
-	if (imsgbuf_flush(&msgbuf) == -1)
-		err(1, "imsgbuf_flush");
+		need_path = 0;
+	}
 
 	for (; *argv != NULL; argv++) {
 		struct imsg msg;
-		int got_progress, n, output_file_send;
-		char path[PATH_MAX], url[ENGINE_URL_MAX];
-		const char *pathp;
+		int got_progress, n;
+		char url[ENGINE_URL_MAX];
 
 		memset(url, 0, sizeof(url));
 		if (strlcpy(url, *argv, sizeof(url))
@@ -215,7 +215,8 @@ main(int argc, char *argv[])
 		 */
 		if (imsg_get_type(&msg) == ENGINE_IMSG_PATH) {
 			size_t i;
-			char *dotdot;
+			char *dotdot, path[PATH_MAX];
+			int output_file_send;
 
 			if (!need_path)
 				errx(1, "engine sent path when it was not needed");
@@ -236,23 +237,14 @@ main(int argc, char *argv[])
 			for (i = 0; path[i] != '\0'; i++)
 				if (!isprint(path[i]) && !isspace(path[i]))
 					errx(1, "engine sent path with nonprinting characters");
-			pathp = path;
-		}
-		else {
-			if (need_path)
-				errx(1, "engine didnt send path when it was needed");
-			pathp = output_path;
-		}
-		imsg_free(&msg);
 
-		if (output_file == -1) {
-			if ((output_file_send = open(pathp,
+			if ((output_file_send = open(path,
 						  O_WRONLY | O_CREAT | O_EXCL | O_TRUNC,
 						  0644)) == -1) {
 				if (errno == EEXIST) {
 					int ch;
 
-					fprintf(stderr, "file %s exists, overwrite? (y/n) ", pathp);
+					fprintf(stderr, "file %s exists, overwrite? (y/n) ", path);
 
 					ch = fgetc(stdin);
 					switch (ch) {
@@ -268,31 +260,33 @@ main(int argc, char *argv[])
 						errx(1, "invalid response");
 					}
 
-					output_file_send = open(pathp,
+					output_file_send = open(path,
 								 O_WRONLY | O_CREAT | O_TRUNC,
 								 0644);
 					if (output_file_send == -1)
-						err(1, "%s", pathp);
+						err(1, "%s", path);
 				}
-				err(1, "%s", pathp);
+				err(1, "%s", path);
 			}
-		}
-		else {
-			output_file_send = output_file;
-		}
 
-		if (output_file == STDOUT_FILENO)
-			fprintf(stderr, "saving file to stdout\n");
-		else
-			fprintf(stderr, "saving file to %s\n", pathp);
-
-		if (output_file_send != STDOUT_FILENO) {
 			if (imsg_compose(&msgbuf, ENGINE_IMSG_FILE, 0,
 					 -1, output_file_send, NULL, 0) == -1)
 				err(1, "imsg_compose");
 			if (imsgbuf_flush(&msgbuf) == -1)
 				err(1, "imsgbuf_flush");
+
+			fprintf(stderr, "saving file to %s\n", path);
 		}
+		else {
+			if (need_path)
+				errx(1, "engine didnt send path when it was needed");
+			if (output_stdout)
+				fprintf(stderr, "saving file to stdout\n");
+			else
+				fprintf(stderr, "saving file to %s\n", output_path);
+		}
+
+		imsg_free(&msg);
 
 		got_progress = 0;
 		for (;;) {
