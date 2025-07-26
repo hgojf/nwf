@@ -231,6 +231,8 @@ main(int argc, char *argv[])
 					errx(1, "engine sent relative path");
 				dotdot += 3;
 			}
+			if (strchr(path, '/') != NULL)
+				errx(1, "engine sent filename with path separator");
 			for (i = 0; path[i] != '\0'; i++)
 				if (!isprint(path[i]) && !isspace(path[i]))
 					errx(1, "engine sent path with nonprinting characters");
