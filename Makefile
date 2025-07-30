@@ -19,7 +19,7 @@ nwf: $(OBJS_NWF)
 -include $(DEPS_NWF)
 
 LDFLAGS_ENGINE = -ltls -lutil
-SRCS_ENGINE = imsg-blocking.c engine.c
+SRCS_ENGINE = engine.c imsg-blocking.c 
 
 DEPS_ENGINE = $(SRCS_ENGINE:.c=.d)
 OBJS_ENGINE = $(SRCS_ENGINE:.c=.o)
